@@ -1,5 +1,11 @@
 import streamlit as st
-from openai import OpenAI
+from io import BytesIO
+import soundfile as sf
+from streamlit_webrtc import webrtc_streamer, AudioProcessorBase
+from streamlit_mic_recorder import mic_recorder
+import IPython.display as ipd
+import av
+
 
 # Show title and description.
 st.title("💬 Chatbot")
@@ -9,48 +15,64 @@ st.write(
     "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
 )
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
+def callback():
+    if st.session_state.my_recorder_output:
+        audio_bytes = st.session_state.my_recorder_output['bytes']
+        st.audio(audio_bytes)
+
+# Seleccionar modo de entrada
+input_mode = st.radio("Selecciona el modo de entrada de audio:", ("Grabar Audio", "Subir Archivo de Audio"))
+
+# Funciones de utilidad para grabación y carga
+def process_audio(audio_data):
+    # Procesamiento ficticio para la IA Text2Speech
+    st.success("Audio recibido. Procesando con el modelo de IA...")
+    # Simular una respuesta en audio (aquí debería ir la llamada real al modelo de IA)
+    st.audio(audio_data, format='audio/wav')
+
+# Procesador de audio para capturar el audio en tiempo real
+class AudioProcessor(AudioProcessorBase):
+    def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
+        audio_data = frame.to_ndarray()
+        buffer = BytesIO()
+        sf.write(buffer, audio_data, frame.sample_rate, format='WAV')
+        process_audio(buffer.getvalue())
+        return frame
+
+# # Opción para grabar audio usando streamlit-webrtc
+# def record_audio():
+#     st.info("Presiona 'Start' para comenzar a grabar tu voz.")
+#     webrtc_streamer(key="audio", audio_receiver_size=1024, media_stream_constraints={"audio": True, "video": False}, 
+#                     audio_processor_factory=AudioProcessor)
+def record_audio():
+    audio = mic_recorder(
+        start_prompt="Start recording",
+        stop_prompt="Stop recording",
+        just_once=False,
+        format="wav",
+        key="recorder"
+    )
+    # audio = mic_recorder(start_prompt="⏺️", stop_prompt="⏹️", key='recorder')
+    return audio
+# Opción para subir archivo de audio
+def upload_audio():
+    audio_file = st.file_uploader("Sube tu archivo de audio", type=["wav", "mp3", "ogg"])
+
+    if audio_file is not None:
+        audio_data = audio_file.read()
+        st.audio(audio_data)
+        process_audio(audio_data)
+
+# Lógica principal
+if input_mode == "Grabar Audio":
+    ex_audio = record_audio()
+    
+    # Se muestra por pantalla el audio a analizar
+    if ex_audio:
+        st.audio(ex_audio['bytes'])
+
+
+
 else:
+    upload_audio()
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
-
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    # Display the existing chat messages via `st.chat_message`.
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
-
-        # Store and display the current prompt.
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
-        # Generate a response using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
-        )
-
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
-        with st.chat_message("assistant"):
-            response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
